@@ -1,1028 +1,746 @@
-import 'dart:async';
-import 'dart:convert';
+import 'package:material_ui/material_ui.dart';
+import 'package:faker/faker.dart' show Faker;
+import 'package:intl/intl.dart';
+import 'package:intl/date_symbol_data_local.dart';
+import 'package:convex_bottom_bar/convex_bottom_bar.dart';
+import 'package:dropdown_search/dropdown_search.dart';
+import 'package:avatar_glow/avatar_glow.dart';
 
-import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+// ============================================================
+// 1. MAIN
+// ============================================================
 
-void main() {
-  runApp(const UserCrudApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Menyiapkan format tanggal Indonesia.
+  await initializeDateFormatting('id_ID', null);
+
+  runApp(const ContactHubApp());
 }
 
 // ============================================================
-// 1. MODEL CLASS
+// 2. MODEL KONTAK
 // ============================================================
 
-class UserModel {
-  final String id;
+class Kontak {
+  final int id;
+  final String nama;
+  final String nomorTelepon;
   final String email;
-  final String firstName;
-  final String lastName;
-  final String avatar;
+  final String kategori;
+  final DateTime tanggalDitambahkan;
 
-  const UserModel({
+  const Kontak({
     required this.id,
+    required this.nama,
+    required this.nomorTelepon,
     required this.email,
-    required this.firstName,
-    required this.lastName,
-    required this.avatar,
+    required this.kategori,
+    required this.tanggalDitambahkan,
   });
-
-  String get fullName => '$firstName $lastName'.trim();
-
-  factory UserModel.fromJson(Map<String, dynamic> json) {
-    final rawName = (json['name'] ?? '').toString().trim();
-
-    final nameParts = rawName.isEmpty
-        ? <String>[]
-        : rawName.split(RegExp(r'\s+'));
-
-    return UserModel(
-      id: (json['id'] ?? '').toString(),
-      email: (json['email'] ?? '').toString(),
-      firstName: (json['first_name'] ??
-              (nameParts.isNotEmpty ? nameParts.first : ''))
-          .toString(),
-      lastName: (json['last_name'] ??
-              (nameParts.length > 1
-                  ? nameParts.skip(1).join(' ')
-                  : ''))
-          .toString(),
-      avatar: (json['avatar'] ?? '').toString(),
-    );
-  }
 }
 
 // ============================================================
-// 2. API EXCEPTION
+// 3. ROOT APPLICATION
 // ============================================================
 
-class ApiException implements Exception {
-  final String message;
-
-  const ApiException(this.message);
-
-  @override
-  String toString() => message;
-}
-
-// ============================================================
-// 3. SERVICE CLASS
-// ============================================================
-
-class UserService {
-  static const String baseUrl = 'https://reqres.in/api';
-
-  static const String apiKey = String.fromEnvironment(
-    'REQRES_API_KEY',
-    defaultValue: 'reqres-free-v1',
-  );
-
-  static const Duration timeoutDuration = Duration(seconds: 15);
-
-  Map<String, String> get headers => {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-      };
-
-  void checkStatus(
-    http.Response response,
-    Set<int> expectedStatusCodes,
-  ) {
-    if (expectedStatusCodes.contains(response.statusCode)) {
-      return;
-    }
-
-    String message =
-        'Request gagal dengan HTTP ${response.statusCode}.';
-
-    if (response.statusCode == 401 ||
-        response.statusCode == 403) {
-      message +=
-          ' API key belum valid atau tidak memiliki akses. '
-          'Periksa konfigurasi REQRES_API_KEY.';
-    } else {
-      try {
-        final decoded = jsonDecode(response.body);
-
-        if (decoded is Map && decoded['error'] != null) {
-          message += ' ${decoded['error']}';
-        }
-      } catch (_) {
-      }
-    }
-
-    throw ApiException(message);
-  }
-
-  Map<String, dynamic> decodeJsonObject(String body) {
-    final decoded = jsonDecode(body);
-
-    if (decoded is Map<String, dynamic>) {
-      return decoded;
-    }
-
-    throw const FormatException(
-      'Format respons API tidak sesuai.',
-    );
-  }
-
-
-  Future<List<UserModel>> getUsers() async {
-    try {
-      final uri = Uri.parse('$baseUrl/users?page=1');
-
-      final response = await http
-          .get(uri, headers: headers)
-          .timeout(timeoutDuration);
-
-      checkStatus(response, {200});
-
-      final decoded = decodeJsonObject(response.body);
-      final data = decoded['data'];
-
-      if (data is! List) {
-        throw const FormatException(
-          'Data pengguna tidak ditemukan dalam respons API.',
-        );
-      }
-
-      return data.map((item) {
-        return UserModel.fromJson(
-          Map<String, dynamic>.from(item as Map),
-        );
-      }).toList();
-    } on TimeoutException {
-      throw const ApiException(
-        'Koneksi timeout. Periksa jaringan internetmu.',
-      );
-    } on http.ClientException {
-      throw const ApiException(
-        'Tidak dapat terhubung ke server. '
-        'Periksa koneksi internet.',
-      );
-    } on FormatException catch (e) {
-      throw ApiException('Format respons tidak valid: ${e.message}');
-    }
-  }
-
-
-  Future<UserModel> createUser({
-    required String firstName,
-    required String lastName,
-    required String email,
-  }) async {
-    try {
-      final response = await http
-          .post(
-            Uri.parse('$baseUrl/users'),
-            headers: headers,
-            body: jsonEncode({
-              'name': '$firstName $lastName'.trim(),
-              'job': 'Mobile Programming Student',
-              'first_name': firstName,
-              'last_name': lastName,
-              'email': email,
-            }),
-          )
-          .timeout(timeoutDuration);
-
-      checkStatus(response, {201});
-
-      final data = decodeJsonObject(response.body);
-
-      return UserModel.fromJson({
-        ...data,
-        'id': data['id']?.toString() ??
-            DateTime.now().millisecondsSinceEpoch.toString(),
-        'first_name': data['first_name'] ?? firstName,
-        'last_name': data['last_name'] ?? lastName,
-        'email': data['email'] ?? email,
-        'avatar': data['avatar'] ?? '',
-      });
-    } on TimeoutException {
-      throw const ApiException(
-        'Request pembuatan pengguna mengalami timeout.',
-      );
-    } on http.ClientException {
-      throw const ApiException(
-        'Gagal menghubungi server. Periksa koneksi internet.',
-      );
-    } on FormatException catch (e) {
-      throw ApiException('Respons POST tidak valid: ${e.message}');
-    }
-  }
-
-
-  Future<UserModel> updateUser({
-    required String id,
-    required String firstName,
-    required String lastName,
-    required String email,
-  }) async {
-    try {
-      final response = await http
-          .put(
-            Uri.parse('$baseUrl/users/$id'),
-            headers: headers,
-            body: jsonEncode({
-              'name': '$firstName $lastName'.trim(),
-              'job': 'Mobile Programming Student',
-              'first_name': firstName,
-              'last_name': lastName,
-              'email': email,
-            }),
-          )
-          .timeout(timeoutDuration);
-
-      checkStatus(response, {200});
-
-      final data = decodeJsonObject(response.body);
-
-      return UserModel.fromJson({
-        ...data,
-        'id': id,
-        'first_name': data['first_name'] ?? firstName,
-        'last_name': data['last_name'] ?? lastName,
-        'email': data['email'] ?? email,
-        'avatar': data['avatar'] ?? '',
-      });
-    } on TimeoutException {
-      throw const ApiException(
-        'Request pembaruan pengguna mengalami timeout.',
-      );
-    } on http.ClientException {
-      throw const ApiException(
-        'Gagal menghubungi server. Periksa koneksi internet.',
-      );
-    } on FormatException catch (e) {
-      throw ApiException('Respons PUT tidak valid: ${e.message}');
-    }
-  }
-
-
-  Future<void> deleteUser(String id) async {
-    try {
-      final response = await http
-          .delete(
-            Uri.parse('$baseUrl/users/$id'),
-            headers: headers,
-          )
-          .timeout(timeoutDuration);
-
-      // HTTP 204 merupakan respons sukses DELETE yang umum.
-      checkStatus(response, {200, 202, 204});
-    } on TimeoutException {
-      throw const ApiException(
-        'Request penghapusan pengguna mengalami timeout.',
-      );
-    } on http.ClientException {
-      throw const ApiException(
-        'Gagal menghubungi server. Periksa koneksi internet.',
-      );
-    }
-  }
-}
-
-// ============================================================
-// 4. HELPER ERROR MESSAGE
-// ============================================================
-
-String getErrorMessage(Object error) {
-  if (error is ApiException) {
-    return error.message;
-  }
-
-  if (error is TimeoutException) {
-    return 'Koneksi timeout. Silakan coba lagi.';
-  }
-
-  if (error is http.ClientException) {
-    return 'Tidak dapat terhubung ke server.';
-  }
-
-  if (error is FormatException) {
-    return 'Format data yang diterima tidak valid.';
-  }
-
-  return 'Terjadi kesalahan: $error';
-}
-
-// ============================================================
-// 5. ROOT APPLICATION
-// ============================================================
-
-class UserCrudApp extends StatelessWidget {
-  const UserCrudApp({super.key});
+class ContactHubApp extends StatelessWidget {
+  const ContactHubApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'CRUD User API',
+      title: 'Contact Hub',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF4056D6),
-        ),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF4056D6)),
         scaffoldBackgroundColor: const Color(0xFFF4F6FC),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFFF4F6FC),
-          foregroundColor: Color(0xFF172554),
-          centerTitle: false,
-        ),
       ),
-      home: const UserListPage(),
+      home: const HalamanUtama(),
     );
   }
 }
 
 // ============================================================
-// 6. MAIN PAGE + FUTURE BUILDER
+// 4. HALAMAN UTAMA DAN CONVEX APP BAR
 // ============================================================
 
-class UserListPage extends StatefulWidget {
-  const UserListPage({super.key});
+class HalamanUtama extends StatefulWidget {
+  const HalamanUtama({super.key});
 
   @override
-  State<UserListPage> createState() => _UserListPageState();
+  State<HalamanUtama> createState() => _HalamanUtamaState();
 }
 
-class _UserListPageState extends State<UserListPage> {
-  final UserService _userService = UserService();
+class _HalamanUtamaState extends State<HalamanUtama> {
+  int _selectedIndex = 0;
 
-  late Future<List<UserModel>> _usersFuture;
-
-  List<UserModel> _users = [];
+  late final List<Kontak> _daftarKontak;
+  late final List<Widget> _halaman;
 
   @override
   void initState() {
     super.initState();
-    _usersFuture = _loadUsers();
+
+    _daftarKontak = _buatDataKontak();
+
+    _halaman = [
+      HalamanKontak(daftarKontak: _daftarKontak),
+      HalamanCari(daftarKontak: _daftarKontak),
+      const HalamanProfil(),
+    ];
   }
 
-  Future<List<UserModel>> _loadUsers() async {
-    final users = await _userService.getUsers();
-    _users = List<UserModel>.from(users);
-    return users;
-  }
+  // ==========================================================
+  // 5. MEMBUAT DATA DUMMY DENGAN FAKER
+  // ==========================================================
 
-  void _refreshUsers() {
-    setState(() {
-      _usersFuture = _loadUsers();
+  List<Kontak> _buatDataKontak() {
+    final Faker faker = Faker();
+
+    // Nama kontak menggunakan nama Indonesia.
+    final List<String> namaIndonesia = [
+      'Ahmad Fauzan',
+      'Siti Nur Aisyah',
+      'Muhammad Rizky Pratama',
+      'Nabila Putri Lestari',
+      'Aditya Firmansyah',
+      'Nurul Hidayah',
+      'Bagas Saputra',
+      'Dinda Ayuningtyas',
+      'Fajar Ramadhan',
+      'Intan Permatasari',
+      'Rizky Maulana',
+      'Anisa Rahmawati',
+      'Ilham Setiawan',
+      'Putri Maharani',
+      'Yoga Prasetyo',
+      'Fitri Handayani',
+      'Galih Kurniawan',
+      'Laila Khairunnisa',
+    ];
+
+    // Kode awal nomor telepon Indonesia.
+    final List<String> kodeNomor = [
+      '11',
+      '12',
+      '13',
+      '21',
+      '22',
+      '23',
+      '52',
+      '53',
+    ];
+
+    // Pembagian kategori kontak.
+    final List<String> kategoriKontak = ['Keluarga', 'Teman', 'Kerja'];
+
+    return List.generate(namaIndonesia.length, (index) {
+      final nama = namaIndonesia[index];
+
+      // Mengubah nama menjadi format email.
+      final emailNama = nama.toLowerCase().replaceAll(
+        RegExp(r'[^a-z0-9]+'),
+        '.',
+      );
+
+      // Membuat 8 digit nomor secara acak dengan Faker.
+      final String angkaAcak = List.generate(
+        8,
+        (_) => faker.randomGenerator.integer(10).toString(),
+      ).join();
+
+      // Memilih kode nomor secara acak.
+      final String kode =
+          kodeNomor[faker.randomGenerator.integer(kodeNomor.length)];
+
+      final String nomorTelepon =
+          '08$kode-${angkaAcak.substring(0, 4)}-'
+          '${angkaAcak.substring(4)}';
+
+      // Tanggal ditambahkan dibuat secara acak.
+      final DateTime tanggal = DateTime.now().subtract(
+        Duration(days: faker.randomGenerator.integer(730)),
+      );
+
+      return Kontak(
+        id: index + 1,
+        nama: nama,
+        nomorTelepon: nomorTelepon,
+        email: '$emailNama${index + 1}@example.com',
+        kategori: kategoriKontak[index % 3],
+        tanggalDitambahkan: tanggal,
+      );
     });
   }
 
-  void _showMessage(
-    String message, {
-    bool isError = false,
-  }) {
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: isError
-              ? Colors.red.shade700
-              : Colors.green.shade700,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-  }
-
-
-  Future<void> _openUserForm({UserModel? user}) async {
-    final result = await showDialog<UserModel>(
-      context: context,
-      builder: (context) {
-        return UserFormDialog(
-          user: user,
-          onSave: ({
-            required firstName,
-            required lastName,
-            required email,
-          }) {
-            if (user == null) {
-              return _userService.createUser(
-                firstName: firstName,
-                lastName: lastName,
-                email: email,
-              );
-            }
-
-            return _userService.updateUser(
-              id: user.id,
-              firstName: firstName,
-              lastName: lastName,
-              email: email,
-            );
-          },
-        );
-      },
-    );
-
-    if (!mounted || result == null) return;
-
-    setState(() {
-      if (user == null) {
-        _users.insert(0, result);
-      } else {
-        final index = _users.indexWhere(
-          (item) => item.id == user.id,
-        );
-
-        if (index != -1) {
-          _users[index] = result;
-        } else {
-          _users.insert(0, result);
-        }
-      }
-
-      _usersFuture = Future<List<UserModel>>.value(
-        List<UserModel>.from(_users),
-      );
-    });
-
-    _showMessage(
-      user == null
-          ? 'Pengguna berhasil dibuat.'
-          : 'Data pengguna berhasil diperbarui.',
-    );
-  }
-
-
-  Future<void> _deleteUser(UserModel user) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Hapus Pengguna?'),
-          content: Text(
-            'Apakah kamu yakin ingin menghapus '
-            '${user.fullName}?',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(dialogContext, false);
-              },
-              child: const Text('Batal'),
-            ),
-            FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: Colors.red,
-              ),
-              onPressed: () {
-                Navigator.pop(dialogContext, true);
-              },
-              child: const Text('Hapus'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (confirmed != true) return;
-
-    try {
-      await _userService.deleteUser(user.id);
-
-      if (!mounted) return;
-
-      setState(() {
-        _users.removeWhere((item) => item.id == user.id);
-
-        _usersFuture = Future<List<UserModel>>.value(
-          List<UserModel>.from(_users),
-        );
-      });
-
-      _showMessage('Pengguna berhasil dihapus.');
-    } catch (error) {
-      _showMessage(
-        'Gagal menghapus pengguna: ${getErrorMessage(error)}',
-        isError: true,
-      );
-    }
-  }
-
-
-  Widget _buildUserCard(UserModel user) {
-    return Card(
-      margin: const EdgeInsets.symmetric(
-        horizontal: 16,
-        vertical: 6,
-      ),
-      elevation: 0,
-      color: Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18),
-        side: const BorderSide(
-          color: Color(0xFFE7EAF3),
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          children: [
-            CircleAvatar(
-              radius: 28,
-              backgroundColor: const Color(0xFFE9EDFF),
-              child: user.avatar.isNotEmpty
-                  ? ClipOval(
-                      child: Image.network(
-                        user.avatar,
-                        width: 56,
-                        height: 56,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return const Icon(
-                            Icons.person,
-                            size: 30,
-                            color: Color(0xFF4056D6),
-                          );
-                        },
-                      ),
-                    )
-                  : const Icon(
-                      Icons.person,
-                      size: 30,
-                      color: Color(0xFF4056D6),
-                    ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    user.fullName.isEmpty
-                        ? 'Nama tidak tersedia'
-                        : user.fullName,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF172554),
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    user.email.isEmpty
-                        ? 'Email tidak tersedia'
-                        : user.email,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF64748B),
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    'ID: ${user.id}',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: Color(0xFF64748B),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            PopupMenuButton<String>(
-              tooltip: 'Aksi pengguna',
-              onSelected: (value) {
-                if (value == 'edit') {
-                  _openUserForm(user: user);
-                } else if (value == 'delete') {
-                  _deleteUser(user);
-                }
-              },
-              itemBuilder: (context) => const [
-                PopupMenuItem(
-                  value: 'edit',
-                  child: Row(
-                    children: [
-                      Icon(Icons.edit_outlined, size: 19),
-                      SizedBox(width: 10),
-                      Text('Edit'),
-                    ],
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'delete',
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.delete_outline,
-                        size: 19,
-                        color: Colors.red,
-                      ),
-                      SizedBox(width: 10),
-                      Text('Hapus'),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-
-  Widget _buildLoading() {
-    return const Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          CircularProgressIndicator(),
-          SizedBox(height: 16),
-          Text('Mengambil data pengguna...'),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildError(Object error) {
-    return Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(
-              Icons.cloud_off_outlined,
-              size: 64,
-              color: Colors.redAccent,
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Gagal Memuat Data',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w800,
-                color: Color(0xFF172554),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              getErrorMessage(error),
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Color(0xFF64748B),
-                height: 1.5,
-              ),
-            ),
-            const SizedBox(height: 20),
-            FilledButton.icon(
-              onPressed: _refreshUsers,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Coba Lagi'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
+  // ==========================================================
+  // 6. BUILD UTAMA
+  // ==========================================================
 
   @override
   Widget build(BuildContext context) {
+    final List<String> judulHalaman = [
+      'Daftar Kontak',
+      'Cari Kontak',
+      'Profil Saya',
+    ];
+
     return Scaffold(
       appBar: AppBar(
-        title: const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'User Management',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            Text(
-              'CRUD dengan REST API',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.normal,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          IconButton(
-            tooltip: 'Muat ulang data',
-            onPressed: _refreshUsers,
-            icon: const Icon(Icons.refresh_rounded),
+        title: Text(
+          judulHalaman[_selectedIndex],
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF172554),
           ),
-          const SizedBox(width: 8),
-        ],
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Container(
-              width: double.infinity,
-              margin: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [
-                    Color(0xFF4056D6),
-                    Color(0xFF697CF0),
-                  ],
-                ),
-                borderRadius: BorderRadius.circular(22),
-              ),
-              child: const Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.cloud_sync_outlined,
-                    color: Colors.white,
-                    size: 30,
-                  ),
-                  SizedBox(height: 10),
-                  Text(
-                    'Data Pengguna',
-                    style: TextStyle(
-                      fontSize: 21,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.white,
-                    ),
-                  ),
-                  SizedBox(height: 5),
-                  Text(
-                    'Data diambil melalui HTTP GET dari ReqRes API.',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: FutureBuilder<List<UserModel>>(
-                future: _usersFuture,
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState ==
-                      ConnectionState.waiting) {
-                    return _buildLoading();
-                  }
-
-                  if (snapshot.hasError) {
-                    return _buildError(snapshot.error!);
-                  }
-
-                  final users = snapshot.data ?? [];
-
-                  if (users.isEmpty) {
-                    return const Center(
-                      child: Text('Belum ada data pengguna.'),
-                    );
-                  }
-
-                  return ListView.builder(
-                    padding: const EdgeInsets.only(
-                      top: 4,
-                      bottom: 90,
-                    ),
-                    itemCount: users.length,
-                    itemBuilder: (context, index) {
-                      return _buildUserCard(users[index]);
-                    },
-                  );
-                },
-              ),
-            ),
-          ],
         ),
+        backgroundColor: const Color(0xFFF4F6FC),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _openUserForm(),
-        icon: const Icon(Icons.person_add_alt_1),
-        label: const Text('Tambah Pengguna'),
+
+      // IndexedStack mempertahankan state halaman.
+      body: IndexedStack(index: _selectedIndex, children: _halaman),
+
+      // Navigasi bawah dari convex_bottom_bar.
+      bottomNavigationBar: ConvexAppBar(
+        style: TabStyle.react,
+        backgroundColor: const Color(0xFF172554),
+        color: Colors.white70,
+        activeColor: Colors.white,
+        initialActiveIndex: _selectedIndex,
+        items: const [
+          TabItem(icon: Icons.contacts_rounded, title: 'Kontak'),
+          TabItem(icon: Icons.search_rounded, title: 'Cari'),
+          TabItem(icon: Icons.person_rounded, title: 'Profil'),
+        ],
+        onTap: (index) {
+          setState(() {
+            _selectedIndex = index;
+          });
+        },
       ),
     );
   }
 }
 
 // ============================================================
-// 7. FORM DIALOG UNTUK CREATE & UPDATE
+// 7. HALAMAN KONTAK
 // ============================================================
 
-class UserFormDialog extends StatefulWidget {
-  final UserModel? user;
+class HalamanKontak extends StatelessWidget {
+  final List<Kontak> daftarKontak;
 
-  final Future<UserModel> Function({
-    required String firstName,
-    required String lastName,
-    required String email,
-  }) onSave;
-
-  const UserFormDialog({
-    super.key,
-    required this.onSave,
-    this.user,
-  });
-
-  @override
-  State<UserFormDialog> createState() => _UserFormDialogState();
-}
-
-class _UserFormDialogState extends State<UserFormDialog> {
-  final _formKey = GlobalKey<FormState>();
-
-  late final TextEditingController _firstNameController;
-  late final TextEditingController _lastNameController;
-  late final TextEditingController _emailController;
-
-  bool _isSaving = false;
-  String? _errorMessage;
-
-  @override
-  void initState() {
-    super.initState();
-
-    _firstNameController = TextEditingController(
-      text: widget.user?.firstName ?? '',
-    );
-
-    _lastNameController = TextEditingController(
-      text: widget.user?.lastName ?? '',
-    );
-
-    _emailController = TextEditingController(
-      text: widget.user?.email ?? '',
-    );
-  }
-
-  @override
-  void dispose() {
-    _firstNameController.dispose();
-    _lastNameController.dispose();
-    _emailController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    setState(() {
-      _isSaving = true;
-      _errorMessage = null;
-    });
-
-    try {
-      final savedUser = await widget.onSave(
-        firstName: _firstNameController.text.trim(),
-        lastName: _lastNameController.text.trim(),
-        email: _emailController.text.trim(),
-      );
-
-      if (!mounted) return;
-
-      Navigator.of(context).pop(savedUser);
-    } catch (error) {
-      if (!mounted) return;
-
-      setState(() {
-        _isSaving = false;
-        _errorMessage = getErrorMessage(error);
-      });
-    }
-  }
+  const HalamanKontak({super.key, required this.daftarKontak});
 
   @override
   Widget build(BuildContext context) {
-    final isEditing = widget.user != null;
+    final DateFormat formatTanggal = DateFormat('dd MMMM yyyy', 'id_ID');
 
-    return AlertDialog(
-      title: Text(
-        isEditing ? 'Edit Pengguna' : 'Tambah Pengguna',
-      ),
-      content: SizedBox(
-        width: 420,
-        child: SingleChildScrollView(
-          child: Form(
-            key: _formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  controller: _firstNameController,
-                  enabled: !_isSaving,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    labelText: 'Nama Depan',
-                    prefixIcon: Icon(Icons.person_outline),
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Nama depan wajib diisi.';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 14),
-                TextFormField(
-                  controller: _lastNameController,
-                  enabled: !_isSaving,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    labelText: 'Nama Belakang',
-                    prefixIcon: Icon(Icons.person_outline),
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Nama belakang wajib diisi.';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 14),
-                TextFormField(
-                  controller: _emailController,
-                  enabled: !_isSaving,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(
-                    labelText: 'Email',
-                    prefixIcon: Icon(Icons.email_outlined),
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (value) {
-                    final email = value?.trim() ?? '';
-
-                    if (email.isEmpty) {
-                      return 'Email wajib diisi.';
-                    }
-
-                    if (!RegExp(
-                      r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
-                    ).hasMatch(email)) {
-                      return 'Format email tidak valid.';
-                    }
-
-                    return null;
-                  },
-                ),
-                if (_errorMessage != null) ...[
-                  const SizedBox(height: 14),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.red.shade50,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(
-                      _errorMessage!,
-                      style: TextStyle(
-                        color: Colors.red.shade800,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                ],
-              ],
+    return Column(
+      children: [
+        // Header informasi kontak.
+        Container(
+          width: double.infinity,
+          margin: const EdgeInsets.fromLTRB(16, 8, 16, 18),
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF4056D6), Color(0xFF7989F5)],
             ),
+            borderRadius: BorderRadius.circular(22),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(
+                Icons.contact_phone_rounded,
+                size: 34,
+                color: Colors.white,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Kontak Saya',
+                style: TextStyle(
+                  fontSize: 22,
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                '${daftarKontak.length} kontak tersimpan',
+                style: const TextStyle(color: Colors.white),
+              ),
+            ],
           ),
         ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: _isSaving
-              ? null
-              : () => Navigator.of(context).pop(),
-          child: const Text('Batal'),
-        ),
-        FilledButton.icon(
-          onPressed: _isSaving ? null : _submit,
-          icon: _isSaving
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
+
+        // Judul daftar.
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Semua Kontak',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF172554),
                   ),
-                )
-              : Icon(
-                  isEditing ? Icons.save_outlined : Icons.add,
                 ),
-          label: Text(
-            _isSaving
-                ? 'Menyimpan...'
-                : isEditing
-                    ? 'Simpan Perubahan'
-                    : 'Daftar Pengguna',
+              ),
+              Text(
+                '${daftarKontak.length} data',
+                style: const TextStyle(fontSize: 12, color: Colors.blueGrey),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 10),
+
+        // Menampilkan kontak menggunakan ListView.builder.
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            itemCount: daftarKontak.length,
+            itemBuilder: (context, index) {
+              return KartuKontak(
+                kontak: daftarKontak[index],
+                formatTanggal: formatTanggal,
+              );
+            },
           ),
         ),
       ],
+    );
+  }
+}
+
+// ============================================================
+// 8. WIDGET KARTU KONTAK
+// ============================================================
+
+class KartuKontak extends StatelessWidget {
+  final Kontak kontak;
+  final DateFormat formatTanggal;
+
+  const KartuKontak({
+    super.key,
+    required this.kontak,
+    required this.formatTanggal,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final String inisial = kontak.nama
+        .trim()
+        .split(RegExp(r'\s+'))
+        .take(2)
+        .map((kata) => kata[0])
+        .join()
+        .toUpperCase();
+
+    return Card(
+      elevation: 0,
+      color: Colors.white,
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: const BorderSide(color: Color(0xFFE4E8F2)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(15),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 26,
+                  backgroundColor: const Color(0xFFE8EEFF),
+                  child: Text(
+                    inisial,
+                    style: const TextStyle(
+                      color: Color(0xFF4056D6),
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        kontak.nama,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          color: Color(0xFF172554),
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        kontak.nomorTelepon,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Colors.blueGrey,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Label kategori.
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEEF1FF),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    kontak.kategori,
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF4056D6),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 14),
+
+            // Email.
+            Row(
+              children: [
+                const Icon(
+                  Icons.email_outlined,
+                  size: 17,
+                  color: Colors.blueGrey,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    kontak.email,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.blueGrey,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 10),
+            const Divider(height: 1),
+            const SizedBox(height: 10),
+
+            // Tanggal penambahan kontak.
+            Row(
+              children: [
+                const Icon(
+                  Icons.calendar_month_outlined,
+                  size: 16,
+                  color: Colors.blueGrey,
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    'Ditambahkan pada: '
+                    '${formatTanggal.format(kontak.tanggalDitambahkan)}',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Colors.blueGrey,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================
+// 9. HALAMAN CARI - DROPDOWN SEARCH
+// ============================================================
+
+class HalamanCari extends StatefulWidget {
+  final List<Kontak> daftarKontak;
+
+  const HalamanCari({super.key, required this.daftarKontak});
+
+  @override
+  State<HalamanCari> createState() => _HalamanCariState();
+}
+
+class _HalamanCariState extends State<HalamanCari> {
+  final List<String> _kategori = [
+    'Semua Kategori',
+    'Keluarga',
+    'Teman',
+    'Kerja',
+  ];
+
+  String _kategoriTerpilih = 'Semua Kategori';
+
+  @override
+  Widget build(BuildContext context) {
+    // Filter kontak berdasarkan kategori.
+    final List<Kontak> hasilFilter = _kategoriTerpilih == 'Semua Kategori'
+        ? widget.daftarKontak
+        : widget.daftarKontak
+              .where((kontak) => kontak.kategori == _kategoriTerpilih)
+              .toList();
+
+    final DateFormat formatTanggal = DateFormat('dd MMMM yyyy', 'id_ID');
+
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Cari Berdasarkan Kategori',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF172554),
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          const Text(
+            'Pilih kategori untuk menampilkan kontak yang sesuai.',
+            style: TextStyle(fontSize: 13, color: Colors.blueGrey),
+          ),
+
+          const SizedBox(height: 20),
+
+          // DropdownSearch menggunakan data offline.
+          DropdownSearch<String>(
+            selectedItem: _kategoriTerpilih,
+
+            // Sumber data kategori.
+            items: (filter, loadProps) {
+              return _kategori
+                  .where(
+                    (item) => item.toLowerCase().contains(filter.toLowerCase()),
+                  )
+                  .toList();
+            },
+
+            // Mengatur tampilan popup pencarian.
+            popupProps: PopupProps.menu(
+              showSearchBox: true,
+              fit: FlexFit.loose,
+              constraints: const BoxConstraints(maxHeight: 300),
+            ),
+
+            // Menangani kategori yang dipilih.
+            onSelected: (String? value) {
+              if (value == null) return;
+
+              setState(() {
+                _kategoriTerpilih = value;
+              });
+            },
+          ),
+
+          const SizedBox(height: 20),
+
+          // Ringkasan hasil pencarian.
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(15),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEEF1FF),
+              borderRadius: BorderRadius.circular(15),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.filter_list_rounded, color: Color(0xFF4056D6)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    '${hasilFilter.length} kontak ditemukan '
+                    'dalam kategori $_kategoriTerpilih',
+                    style: const TextStyle(
+                      color: Color(0xFF172554),
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 14),
+
+          // Hasil pencarian.
+          Expanded(
+            child: hasilFilter.isEmpty
+                ? const Center(child: Text('Kontak tidak ditemukan.'))
+                : ListView.builder(
+                    itemCount: hasilFilter.length,
+                    itemBuilder: (context, index) {
+                      return KartuKontak(
+                        kontak: hasilFilter[index],
+                        formatTanggal: formatTanggal,
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================
+// 10. HALAMAN PROFIL - AVATAR GLOW
+// ============================================================
+
+class HalamanProfil extends StatelessWidget {
+  const HalamanProfil({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        children: [
+          const SizedBox(height: 30),
+
+          // AvatarGlow memberikan efek cahaya pada foto.
+          AvatarGlow(
+            glowColor: const Color(0xFF4056D6),
+            duration: const Duration(seconds: 2),
+            repeat: true,
+            glowRadiusFactor: 0.8,
+            child: Material(
+              elevation: 8,
+              shape: const CircleBorder(),
+              color: Colors.white,
+              child: CircleAvatar(
+                radius: 65,
+                backgroundColor: const Color(0xFFE8EEFF),
+                child: ClipOval(
+                  child: Image.network(
+                    'https://i.pravatar.cc/300?img=12',
+                    width: 130,
+                    height: 130,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return const Icon(
+                        Icons.person,
+                        size: 75,
+                        color: Color(0xFF4056D6),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 25),
+
+          const Text(
+            'Husain Aziz Al Rosyid',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 23,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF172554),
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          const Text(
+            'Mahasiswa Sistem Informasi',
+            style: TextStyle(fontSize: 14, color: Colors.blueGrey),
+          ),
+
+          const SizedBox(height: 5),
+
+          const Text(
+            'Semester 5 • UNIPDU Jombang',
+            style: TextStyle(
+              fontSize: 13,
+              color: Color(0xFF4056D6),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+
+          const SizedBox(height: 25),
+
+          // Informasi profil.
+          Card(
+            elevation: 0,
+            color: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+              side: const BorderSide(color: Color(0xFFE4E8F2)),
+            ),
+            child: const Padding(
+              padding: EdgeInsets.all(20),
+              child: Column(
+                children: [
+                  ListTile(
+                    leading: Icon(
+                      Icons.school_outlined,
+                      color: Color(0xFF4056D6),
+                    ),
+                    title: Text('Program Studi'),
+                    subtitle: Text('Sistem Informasi'),
+                  ),
+                  Divider(),
+                  ListTile(
+                    leading: Icon(
+                      Icons.account_balance_outlined,
+                      color: Color(0xFF4056D6),
+                    ),
+                    title: Text('Universitas'),
+                    subtitle: Text('Universitas Pesantren Tinggi Darul Ulum'),
+                  ),
+                  Divider(),
+                  ListTile(
+                    leading: Icon(
+                      Icons.location_on_outlined,
+                      color: Color(0xFF4056D6),
+                    ),
+                    title: Text('Lokasi'),
+                    subtitle: Text('Jombang, Jawa Timur'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          const Text(
+            'Contact Hub App • Flutter 2026',
+            style: TextStyle(fontSize: 12, color: Colors.blueGrey),
+          ),
+        ],
+      ),
     );
   }
 }
